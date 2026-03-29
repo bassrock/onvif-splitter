@@ -80,7 +80,7 @@ class NvrEventSubscriber:
         self._session: aiohttp.ClientSession | None = None
 
     async def run(self):
-        backoff = 1
+        backoff = 5
         while True:
             try:
                 await self._subscribe_and_poll()
@@ -91,7 +91,7 @@ class NvrEventSubscriber:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 60)
             else:
-                backoff = 1
+                backoff = 5
 
     async def _subscribe_and_poll(self):
         self._session = aiohttp.ClientSession()
@@ -100,7 +100,11 @@ class NvrEventSubscriber:
             self._pullpoint_url = await self._create_subscription()
             if not self._pullpoint_url:
                 log.warning("Failed to create PullPoint subscription, falling back to Dahua HTTP events")
-                await self._poll_dahua_events()
+                try:
+                    await self._poll_dahua_events()
+                except Exception:
+                    log.warning("Dahua HTTP event fallback also failed, will retry after backoff")
+                    raise
                 return
 
             log.info("NVR PullPoint subscription created: %s", self._pullpoint_url)
@@ -277,19 +281,50 @@ class NvrEventSubscriber:
 
     async def _poll_dahua_events(self):
         """Fallback: poll Dahua HTTP event API if ONVIF PullPoint fails."""
-        url = (
-            f"http://{self.nvr.host}:{self.nvr.port}"
-            "/cgi-bin/eventManager.cgi?action=attach"
-            "&codes=[VideoMotion]&heartbeat=5"
-        )
-        auth = aiohttp.BasicAuth(self.nvr.username, self.nvr.password)
+        uri_path = "/cgi-bin/eventManager.cgi?action=attach&codes=[VideoMotion]&heartbeat=5"
+        url = f"http://{self.nvr.host}:{self.nvr.port}{uri_path}"
         log.info("Using Dahua HTTP event API fallback")
+
+        # Dahua requires HTTP Digest auth — first request gets the challenge
+        async with self._session.get(
+            url, timeout=aiohttp.ClientTimeout(total=10)
+        ) as challenge_resp:
+            if challenge_resp.status != 401:
+                # Maybe basic auth works
+                pass
+            else:
+                www_auth = challenge_resp.headers.get("WWW-Authenticate", "")
+                if "Digest" not in www_auth:
+                    raise Exception("Dahua event API: expected Digest auth challenge")
+                # Compute digest auth
+                params = dict(re.findall(r'(\w+)="([^"]*)"', www_auth))
+                realm = params.get("realm", "")
+                nonce = params.get("nonce", "")
+                qop = params.get("qop", "")
+                ha1 = hashlib.md5(f"{self.nvr.username}:{realm}:{self.nvr.password}".encode()).hexdigest()
+                ha2 = hashlib.md5(f"GET:{uri_path}".encode()).hexdigest()
+                if "auth" in qop:
+                    nc = "00000001"
+                    cnonce = os.urandom(8).hex()
+                    response = hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}".encode()).hexdigest()
+                    auth_header = (
+                        f'Digest username="{self.nvr.username}", realm="{realm}", nonce="{nonce}", '
+                        f'uri="{uri_path}", qop=auth, nc={nc}, cnonce="{cnonce}", response="{response}"'
+                    )
+                else:
+                    response = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+                    auth_header = (
+                        f'Digest username="{self.nvr.username}", realm="{realm}", '
+                        f'nonce="{nonce}", uri="{uri_path}", response="{response}"'
+                    )
 
         async with self._session.get(
             url,
-            auth=auth,
+            headers={"Authorization": auth_header},
             timeout=aiohttp.ClientTimeout(total=None, sock_read=30),
         ) as resp:
+            if resp.status != 200:
+                raise Exception(f"Dahua event API returned {resp.status}")
             buffer = b""
             async for chunk in resp.content.iter_any():
                 buffer += chunk
