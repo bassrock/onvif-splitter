@@ -1,5 +1,5 @@
 x-common: &common
-  build: .
+  image: ghcr.io/bassrock/onvif-splitter:main
   restart: unless-stopped
   environment: &common-env
     NVR_HOST: 192.168.2.253
@@ -78,10 +78,5 @@ services:
 
 networks:
   cameras:
-    driver: macvlan
-    driver_opts:
-      parent: eth0  # Change to match your host's network interface
-    ipam:
-      config:
-        - subnet: 192.168.2.0/24
-          gateway: 192.168.2.1
+    external: true
+    name: vlan1
