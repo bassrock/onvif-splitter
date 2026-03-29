@@ -30,7 +30,7 @@ async def main():
 
     devices: list[VirtualDevice] = []
     for ch in cfg.channels:
-        dev = VirtualDevice(ch, cfg.nvr, cfg.onvif_port)
+        dev = VirtualDevice(ch, cfg.nvr, ch.port or cfg.onvif_port)
         devices.append(dev)
 
     # Start all virtual devices

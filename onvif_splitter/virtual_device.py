@@ -57,8 +57,8 @@ class VirtualDevice:
     def rtsp_url(self, subtype: int = 0) -> str:
         return (
             f"rtsp://{self.nvr.host}:{self.nvr.rtsp_port}"
-            f"/cam/realmonitor?channel={self.channel_num}&subtype={subtype}"
-            f"&unicast=true&proto=Onvif"
+            f"/cam/realmonitor?channel={self.channel_num}&amp;subtype={subtype}"
+            f"&amp;unicast=true&amp;proto=Onvif"
         )
 
     async def start(self):

@@ -22,6 +22,7 @@ class ChannelConfig:
     channel: int
     ip: str
     name: str = ""
+    port: int = 0  # 0 = use global onvif_port
     device_uuid: str = ""
 
     def __post_init__(self):
