@@ -5,5 +5,8 @@ __pycache__/
 dist/
 build/
 .env
+CLAUDE.md
+config.local.yaml
+docker-compose.portainer*.yml
 onvif-splitter
 onvif-splitter-arm64
