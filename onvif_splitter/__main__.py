@@ -51,10 +51,14 @@ async def main():
                 exc_info=True,
             )
 
-    # Start NVR event subscriber
-    channel_map = {ch.channel: dev for ch, dev in zip(cfg.channels, devices)}
-    subscriber = NvrEventSubscriber(cfg.nvr, channel_map)
-    subscriber_task = asyncio.create_task(subscriber.run())
+    # Start NVR event subscriber (skip if coordinator handles events)
+    subscriber_task = None
+    if not os.environ.get("COORDINATOR_URL"):
+        channel_map = {ch.channel: dev for ch, dev in zip(cfg.channels, devices)}
+        subscriber = NvrEventSubscriber(cfg.nvr, channel_map)
+        subscriber_task = asyncio.create_task(subscriber.run())
+    else:
+        log.info("Event subscription delegated to coordinator")
 
     # Wait for shutdown signal
     stop_event = asyncio.Event()
@@ -71,11 +75,12 @@ async def main():
 
     # Cleanup
     log.info("Shutting down...")
-    subscriber_task.cancel()
-    try:
-        await subscriber_task
-    except asyncio.CancelledError:
-        pass
+    if subscriber_task:
+        subscriber_task.cancel()
+        try:
+            await subscriber_task
+        except asyncio.CancelledError:
+            pass
 
     for dev in reversed(devices):
         await dev.stop()
@@ -84,4 +89,8 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    if os.environ.get("MODE") == "coordinator":
+        from .coordinator import run_coordinator
+        asyncio.run(run_coordinator())
+    else:
+        asyncio.run(main())

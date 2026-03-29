@@ -75,6 +75,7 @@ class VirtualDevice:
             "/onvif/subscription/{subscription_id}", self.soap_handler.handle
         )
         app.router.add_get("/onvif/snapshot", self.soap_handler.handle_snapshot)
+        app.router.add_post("/internal/event", self._handle_event_push)
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -112,6 +113,12 @@ class VirtualDevice:
         if self._runner:
             await self._runner.cleanup()
         log.info("Virtual device %s stopped", self.name)
+
+    async def _handle_event_push(self, request: web.Request) -> web.Response:
+        """Internal endpoint for coordinator to push events."""
+        event_xml = await request.text()
+        self.pullpoint_manager.push_event(event_xml)
+        return web.Response(text="ok")
 
     def push_event(self, event_xml: str):
         self.pullpoint_manager.push_event(event_xml)

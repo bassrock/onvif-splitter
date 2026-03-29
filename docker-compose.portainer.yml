@@ -1,11 +1,20 @@
+x-common: &common
+  image: ghcr.io/bassrock/onvif-splitter:main
+  restart: unless-stopped
+  environment: &common-env
+    NVR_HOST: 192.168.2.253
+    NVR_PORT: 80
+    NVR_RTSP_PORT: 554
+    NVR_USERNAME: admin
+    NVR_PASSWORD: changeme
+    ONVIF_PORT: 8080
+    COORDINATOR_URL: "true"
+
 services:
-  onvif-splitter:
+  coordinator:
     image: ghcr.io/bassrock/onvif-splitter:main
-    container_name: onvif-splitter
+    container_name: cameras-coordinator
     restart: unless-stopped
-    mac_address: "00:1F:54:ED:0A:DF"
-    cap_add:
-      - NET_ADMIN
     environment:
       NVR_HOST: 192.168.2.253
       NVR_PORT: 80
@@ -13,19 +22,84 @@ services:
       NVR_USERNAME: admin
       NVR_PASSWORD: changeme
       ONVIF_PORT: 8080
-      # channel|ip|name|mac — comma separated
-      # First channel uses the container's primary interface (192.168.2.123).
-      # Remaining channels get macvlan subinterfaces with unique MACs.
+      MODE: coordinator
+      # Coordinator needs to know all channels so it can forward events
       CHANNELS: >-
-        3|192.168.2.123|Camera 3|00:1F:54:ED:0A:DF,
-        4|192.168.2.124|Camera 4|00:1F:54:03:53:B6,
-        5|192.168.2.125|Camera 5|00:1F:54:7A:6C:9A,
-        6|192.168.2.126|Camera 6|00:1F:54:B9:6A:AA,
-        7|192.168.2.127|Camera 7|00:1F:54:04:66:BE,
-        8|192.168.2.128|Camera 8|00:1F:54:DF:5D:6B
+        3|192.168.2.123|Camera 3,
+        4|192.168.2.124|Camera 4,
+        5|192.168.2.125|Camera 5,
+        6|192.168.2.126|Camera 6,
+        7|192.168.2.127|Camera 7,
+        8|192.168.2.128|Camera 8
+    networks:
+      cameras:
+        ipv4_address: 192.168.2.120
+
+  channel3:
+    <<: *common
+    container_name: cameras-channel3
+    mac_address: "00:1F:54:ED:0A:DF"
+    environment:
+      <<: *common-env
+      CHANNELS: "3|192.168.2.123|Camera 3"
     networks:
       cameras:
         ipv4_address: 192.168.2.123
+
+  channel4:
+    <<: *common
+    container_name: cameras-channel4
+    mac_address: "00:1F:54:03:53:B6"
+    environment:
+      <<: *common-env
+      CHANNELS: "4|192.168.2.124|Camera 4"
+    networks:
+      cameras:
+        ipv4_address: 192.168.2.124
+
+  channel5:
+    <<: *common
+    container_name: cameras-channel5
+    mac_address: "00:1F:54:7A:6C:9A"
+    environment:
+      <<: *common-env
+      CHANNELS: "5|192.168.2.125|Camera 5"
+    networks:
+      cameras:
+        ipv4_address: 192.168.2.125
+
+  channel6:
+    <<: *common
+    container_name: cameras-channel6
+    mac_address: "00:1F:54:B9:6A:AA"
+    environment:
+      <<: *common-env
+      CHANNELS: "6|192.168.2.126|Camera 6"
+    networks:
+      cameras:
+        ipv4_address: 192.168.2.126
+
+  channel7:
+    <<: *common
+    container_name: cameras-channel7
+    mac_address: "00:1F:54:04:66:BE"
+    environment:
+      <<: *common-env
+      CHANNELS: "7|192.168.2.127|Camera 7"
+    networks:
+      cameras:
+        ipv4_address: 192.168.2.127
+
+  channel8:
+    <<: *common
+    container_name: cameras-channel8
+    mac_address: "00:1F:54:DF:5D:6B"
+    environment:
+      <<: *common-env
+      CHANNELS: "8|192.168.2.128|Camera 8"
+    networks:
+      cameras:
+        ipv4_address: 192.168.2.128
 
 networks:
   cameras:
