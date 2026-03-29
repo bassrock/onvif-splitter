@@ -3,6 +3,7 @@ services:
     image: ghcr.io/bassrock/onvif-splitter:main
     container_name: onvif-splitter
     restart: unless-stopped
+    mac_address: "00:1F:54:ED:0A:DF"
     cap_add:
       - NET_ADMIN
     environment:
@@ -16,12 +17,12 @@ services:
       # First channel uses the container's primary interface (192.168.2.123).
       # Remaining channels get macvlan subinterfaces with unique MACs.
       CHANNELS: >-
-        3|192.168.2.123|Camera 3|02:42:c0:a8:02:7b,
-        4|192.168.2.124|Camera 4|02:42:c0:a8:02:7c,
-        5|192.168.2.125|Camera 5|02:42:c0:a8:02:7d,
-        6|192.168.2.126|Camera 6|02:42:c0:a8:02:7e,
-        7|192.168.2.127|Camera 7|02:42:c0:a8:02:7f,
-        8|192.168.2.128|Camera 8|02:42:c0:a8:02:80
+        3|192.168.2.123|Camera 3|00:1F:54:ED:0A:DF,
+        4|192.168.2.124|Camera 4|00:1F:54:03:53:B6,
+        5|192.168.2.125|Camera 5|00:1F:54:7A:6C:9A,
+        6|192.168.2.126|Camera 6|00:1F:54:B9:6A:AA,
+        7|192.168.2.127|Camera 7|00:1F:54:04:66:BE,
+        8|192.168.2.128|Camera 8|00:1F:54:DF:5D:6B
     networks:
       cameras:
         ipv4_address: 192.168.2.123

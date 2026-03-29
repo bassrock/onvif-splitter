@@ -12,7 +12,7 @@ from .virtual_device import VirtualDevice
 from .events.nvr_subscriber import NvrEventSubscriber
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
 )
 log = logging.getLogger("onvif_splitter")

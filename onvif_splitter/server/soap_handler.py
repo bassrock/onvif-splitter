@@ -149,26 +149,55 @@ class SoapHandler:
     def _validate_auth(self, doc: etree._Element) -> bool:
         header = doc.find("s:Header", NS)
         if header is None:
+            # Try without namespace prefix — some clients use different prefixes
+            header = doc.find("{http://www.w3.org/2003/05/soap-envelope}Header")
+        if header is None:
+            log.debug("Auth: no SOAP header found")
             return False
 
+        # Search for Security element flexibly
         security = header.find("wsse:Security", NS)
         if security is None:
+            # Try direct namespace search
+            for child in header:
+                if "Security" in child.tag:
+                    security = child
+                    break
+        if security is None:
+            log.debug("Auth: no Security element found")
             return False
 
+        # Search for UsernameToken flexibly
         token = security.find("wsse:UsernameToken", NS)
         if token is None:
+            for child in security:
+                if "UsernameToken" in child.tag:
+                    token = child
+                    break
+        if token is None:
+            log.debug("Auth: no UsernameToken found")
             return False
 
-        username_elem = token.find("wsse:Username", NS)
-        password_elem = token.find("wsse:Password", NS)
-        nonce_elem = token.find("wsse:Nonce", NS)
-        created_elem = token.find("wsu:Created", NS)
+        # Find child elements by local name (namespace-agnostic)
+        username_elem = password_elem = nonce_elem = created_elem = None
+        for elem in token:
+            local = etree.QName(elem).localname
+            if local == "Username":
+                username_elem = elem
+            elif local == "Password":
+                password_elem = elem
+            elif local == "Nonce":
+                nonce_elem = elem
+            elif local == "Created":
+                created_elem = elem
 
         if username_elem is None or password_elem is None:
+            log.debug("Auth: missing Username or Password element")
             return False
 
         username = username_elem.text or ""
         if username != self.device.nvr.username:
+            log.debug("Auth: username mismatch: got %r expected %r", username, self.device.nvr.username)
             return False
 
         password_type = password_elem.get("Type", "")
@@ -176,6 +205,7 @@ class SoapHandler:
         if "PasswordDigest" in password_type:
             # WS-Security PasswordDigest: Base64(SHA1(nonce + created + password))
             if nonce_elem is None or created_elem is None:
+                log.debug("Auth: PasswordDigest but missing nonce/created")
                 return False
 
             nonce = base64.b64decode(nonce_elem.text or "")
@@ -186,6 +216,7 @@ class SoapHandler:
 
             received = password_elem.text or ""
             if received != expected_digest:
+                log.debug("Auth: digest mismatch")
                 return False
 
             # Check clock skew
@@ -204,8 +235,10 @@ class SoapHandler:
         elif "PasswordText" in password_type or not password_type:
             # Plain text password
             if (password_elem.text or "") != self.device.nvr.password:
+                log.debug("Auth: plaintext password mismatch")
                 return False
         else:
+            log.debug("Auth: unknown password type: %s", password_type)
             return False
 
         return True
