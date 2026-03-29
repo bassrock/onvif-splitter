@@ -9,26 +9,26 @@ onvif_port: 8080
 
 channels:
   - channel: 1
-    ip: 192.168.2.161
+    ip: 192.168.2.121
     name: "Camera 1"
   - channel: 2
-    ip: 192.168.2.162
+    ip: 192.168.2.122
     name: "Camera 2"
   - channel: 3
-    ip: 192.168.2.163
+    ip: 192.168.2.123
     name: "Camera 3"
   - channel: 4
-    ip: 192.168.2.164
+    ip: 192.168.2.124
     name: "Camera 4"
   - channel: 5
-    ip: 192.168.2.165
+    ip: 192.168.2.125
     name: "Camera 5"
   - channel: 6
-    ip: 192.168.2.166
+    ip: 192.168.2.126
     name: "Camera 6"
   - channel: 7
-    ip: 192.168.2.167
+    ip: 192.168.2.127
     name: "Camera 7"
   - channel: 8
-    ip: 192.168.2.168
+    ip: 192.168.2.128
     name: "Camera 8"
