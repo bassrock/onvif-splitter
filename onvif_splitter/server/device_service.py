@@ -155,6 +155,7 @@ class DeviceService:
 
     async def get_network_interfaces(self, elem: etree._Element, request: web.Request) -> bytes:
         d = self.device
+        mac = d.channel.mac or "00:00:00:00:00:00"
         return f"""<?xml version="1.0" encoding="UTF-8"?>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
   xmlns:tds="http://www.onvif.org/ver10/device/wsdl"
@@ -165,6 +166,7 @@ class DeviceService:
         <tt:Enabled>true</tt:Enabled>
         <tt:Info>
           <tt:Name>eth0</tt:Name>
+          <tt:HwAddress>{mac}</tt:HwAddress>
         </tt:Info>
         <tt:IPv4>
           <tt:Enabled>true</tt:Enabled>

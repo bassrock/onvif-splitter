@@ -1,0 +1,107 @@
+x-common: &common
+  image: ghcr.io/bassrock/onvif-splitter:main
+  restart: unless-stopped
+  environment: &common-env
+    NVR_HOST: 192.168.1.238
+    NVR_PORT: 80
+    NVR_RTSP_PORT: 554
+    NVR_USERNAME: admin
+    NVR_PASSWORD: changeme
+    ONVIF_PORT: 8080
+    COORDINATOR_URL: "true"
+
+services:
+  coordinator:
+    image: ghcr.io/bassrock/onvif-splitter:main
+    container_name: cameras2-coordinator
+    restart: unless-stopped
+    environment:
+      NVR_HOST: 192.168.1.238
+      NVR_PORT: 80
+      NVR_RTSP_PORT: 554
+      NVR_USERNAME: admin
+      NVR_PASSWORD: changeme
+      ONVIF_PORT: 8080
+      MODE: coordinator
+      CHANNELS: >-
+        1|192.168.1.121|Camera 1,
+        2|192.168.1.122|Camera 2,
+        4|192.168.1.124|Camera 4,
+        7|192.168.1.127|Camera 7,
+        8|192.168.1.128|Camera 8,
+        11|192.168.1.131|Camera 11
+    networks:
+      cameras:
+        ipv4_address: 192.168.1.120
+
+  channel1:
+    <<: *common
+    container_name: cameras2-channel1
+    mac_address: "00:1F:54:A1:B2:01"
+    environment:
+      <<: *common-env
+      CHANNELS: "1|192.168.1.121|Camera 1|00:1F:54:A1:B2:01"
+    networks:
+      cameras:
+        ipv4_address: 192.168.1.121
+
+  channel2:
+    <<: *common
+    container_name: cameras2-channel2
+    environment:
+      <<: *common-env
+      CHANNELS: "2|192.168.1.122|Camera 2|00:1F:54:A1:B2:02"
+    networks:
+      cameras:
+        ipv4_address: 192.168.1.122
+
+  channel4:
+    <<: *common
+    container_name: cameras2-channel4
+    environment:
+      <<: *common-env
+      CHANNELS: "4|192.168.1.124|Camera 4|00:1F:54:A1:B2:04"
+    networks:
+      cameras:
+        ipv4_address: 192.168.1.124
+
+  channel7:
+    <<: *common
+    container_name: cameras2-channel7
+    environment:
+      <<: *common-env
+      CHANNELS: "7|192.168.1.127|Camera 7|00:1F:54:A1:B2:07"
+    networks:
+      cameras:
+        ipv4_address: 192.168.1.127
+
+  channel8:
+    <<: *common
+    container_name: cameras2-channel8
+    environment:
+      <<: *common-env
+      CHANNELS: "8|192.168.1.128|Camera 8|00:1F:54:A1:B2:08"
+    networks:
+      cameras:
+        ipv4_address: 192.168.1.128
+
+  channel11:
+    <<: *common
+    container_name: cameras2-channel11
+    environment:
+      <<: *common-env
+      CHANNELS: "11|192.168.1.131|Camera 11|00:1F:54:A1:B2:0B"
+    networks:
+      cameras:
+        ipv4_address: 192.168.1.131
+
+networks:
+  cameras:
+    driver: ipvlan
+    driver_opts:
+      parent: wlan0
+      ipvlan_mode: l2
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1
