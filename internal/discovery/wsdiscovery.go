@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,37 +18,75 @@ const (
 )
 
 type Device struct {
-	UUID   string
-	Name   string
-	IP     string
-	Port   int
+	UUID string
+	Name string
+	IP   string
+	Port int
 }
 
-func Start(ctx context.Context, dev Device) error {
+// SharedDiscovery handles WS-Discovery for all devices from a single socket
+type SharedDiscovery struct {
+	mu      sync.Mutex
+	devices []Device
+	started bool
+}
+
+var shared SharedDiscovery
+
+// Register adds a device and starts the shared listener on first call
+func Register(ctx context.Context, dev Device) error {
+	shared.mu.Lock()
+	shared.devices = append(shared.devices, dev)
+	needsStart := !shared.started
+	shared.started = true
+	shared.mu.Unlock()
+
+	if needsStart {
+		return startShared(ctx)
+	}
+
+	// Send Hello for newly registered device
+	addr, _ := net.ResolveUDPAddr("udp4", multicastAddr)
+	conn, err := net.DialUDP("udp4", nil, addr)
+	if err == nil {
+		conn.Write([]byte(makeHello(dev)))
+		conn.Close()
+	}
+
+	log.Printf("WS-Discovery registered %s on %s", dev.Name, dev.IP)
+	return nil
+}
+
+func startShared(ctx context.Context) error {
 	addr, err := net.ResolveUDPAddr("udp4", multicastAddr)
 	if err != nil {
 		return err
 	}
 
-	localAddr, err := net.ResolveUDPAddr("udp4", dev.IP+":3702")
-	if err != nil {
-		return err
-	}
-
+	// Listen on all interfaces for multicast
 	conn, err := net.ListenMulticastUDP("udp4", nil, addr)
 	if err != nil {
-		// Fallback: listen on specific IP
-		conn, err = net.ListenUDP("udp4", localAddr)
-		if err != nil {
-			return fmt.Errorf("ws-discovery listen: %w", err)
+		// Fallback: listen on 0.0.0.0
+		fallback, err2 := net.ListenUDP("udp4", &net.UDPAddr{Port: 3702})
+		if err2 != nil {
+			return fmt.Errorf("ws-discovery listen: %w (multicast: %v)", err2, err)
 		}
+		conn = fallback
 	}
 
-	log.Printf("WS-Discovery started for %s on %s", dev.Name, dev.IP)
+	log.Printf("WS-Discovery shared listener started on port 3702")
 
-	// Send Hello
-	hello := makeHello(dev)
-	conn.WriteToUDP([]byte(hello), addr)
+	// Send Hello for all registered devices
+	shared.mu.Lock()
+	devs := make([]Device, len(shared.devices))
+	copy(devs, shared.devices)
+	shared.mu.Unlock()
+
+	for _, dev := range devs {
+		hello := makeHello(dev)
+		conn.WriteToUDP([]byte(hello), addr)
+		log.Printf("WS-Discovery Hello sent for %s", dev.Name)
+	}
 
 	go func() {
 		defer conn.Close()
@@ -55,9 +94,14 @@ func Start(ctx context.Context, dev Device) error {
 		for {
 			select {
 			case <-ctx.Done():
-				// Send Bye
-				bye := makeBye(dev)
-				conn.WriteToUDP([]byte(bye), addr)
+				// Send Bye for all devices
+				shared.mu.Lock()
+				allDevs := make([]Device, len(shared.devices))
+				copy(allDevs, shared.devices)
+				shared.mu.Unlock()
+				for _, dev := range allDevs {
+					conn.WriteToUDP([]byte(makeBye(dev)), addr)
+				}
 				return
 			default:
 			}
@@ -71,8 +115,7 @@ func Start(ctx context.Context, dev Device) error {
 			data := string(buf[:n])
 			if strings.Contains(data, "Probe") && !strings.Contains(data, "ProbeMatch") {
 				msgID := extractTag(data, "MessageID")
-				resp := makeProbeMatch(dev, msgID)
-				conn.WriteToUDP([]byte(resp), remoteAddr)
+				handleProbe(conn, remoteAddr, msgID)
 			}
 		}
 	}()
@@ -80,6 +123,23 @@ func Start(ctx context.Context, dev Device) error {
 	return nil
 }
 
+func handleProbe(conn *net.UDPConn, remoteAddr *net.UDPAddr, msgID string) {
+	shared.mu.Lock()
+	devs := make([]Device, len(shared.devices))
+	copy(devs, shared.devices)
+	shared.mu.Unlock()
+
+	for _, dev := range devs {
+		resp := makeProbeMatch(dev, msgID)
+		conn.WriteToUDP([]byte(resp), remoteAddr)
+	}
+	log.Printf("WS-Discovery: sent %d ProbeMatches to %s", len(devs), remoteAddr)
+}
+
+// Start is kept for backward compatibility with Python Docker version
+func Start(ctx context.Context, dev Device) error {
+	return Register(ctx, dev)
+}
 
 func extractTag(xml, tag string) string {
 	patterns := []string{
