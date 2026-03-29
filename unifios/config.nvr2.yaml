@@ -5,7 +5,7 @@ nvr:
   username: admin
   password: changeme
 
-onvif_port: 8080
+onvif_port: 8000
 
 channels:
   - channel: 1
