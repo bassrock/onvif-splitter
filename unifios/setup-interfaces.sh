@@ -1,12 +1,9 @@
 #!/bin/bash
-# Create macvlan interfaces for virtual ONVIF cameras.
-# Edit the CAMERAS array below to match your config.yaml.
-#
-# Each entry: "interface_name ip_address mac_address parent_interface"
-# The parent_interface should be the VLAN interface your NVR is on.
-# Run "ip link" to find available interfaces (e.g., br0, br1, eth0, br0.1)
+# Create veth pairs for virtual ONVIF cameras.
+# Each camera gets a veth pair: one end bridged into br0 (visible to Protect),
+# the other end with the camera's IP and unique MAC.
 
-PARENT="br0"  # Change to match your network interface
+BRIDGE="br0"
 
 CAMERAS=(
     "cam1  192.168.1.121/24  00:1F:54:A1:B2:01"
@@ -19,15 +16,17 @@ CAMERAS=(
 
 for entry in "${CAMERAS[@]}"; do
     read -r NAME IP MAC <<< "$entry"
+    BR_END="${NAME}-br"
 
-    # Skip if already exists
     if ip link show "$NAME" &>/dev/null; then
         echo "Interface $NAME already exists, skipping"
         continue
     fi
 
-    echo "Creating $NAME: IP=$IP MAC=$MAC on $PARENT"
-    ip link add "$NAME" link "$PARENT" type macvlan mode bridge
+    echo "Creating $NAME: IP=$IP MAC=$MAC (bridged to $BRIDGE)"
+    ip link add "$BR_END" type veth peer name "$NAME"
+    ip link set "$BR_END" master "$BRIDGE"
+    ip link set "$BR_END" up
     ip link set "$NAME" address "$MAC"
     ip addr add "$IP" dev "$NAME"
     ip link set "$NAME" up
