@@ -1,0 +1,25 @@
+services:
+  onvif-splitter:
+    build: .
+    container_name: onvif-splitter
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    environment:
+      # Comma-separated secondary IPs (first IP comes from macvlan below)
+      SECONDARY_IPS: "192.168.2.162/24,192.168.2.163/24,192.168.2.164/24,192.168.2.165/24,192.168.2.166/24,192.168.2.167/24,192.168.2.168/24"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      cameras:
+        ipv4_address: 192.168.2.161
+
+networks:
+  cameras:
+    driver: macvlan
+    driver_opts:
+      parent: eth0  # Change to match your host's network interface (e.g., ens18, enp0s3)
+    ipam:
+      config:
+        - subnet: 192.168.2.0/24
+          gateway: 192.168.2.1
