@@ -22,6 +22,7 @@ class ChannelConfig:
     channel: int
     ip: str
     name: str = ""
+    mac: str = ""  # unique MAC for macvlan subinterface
     port: int = 0  # 0 = use global onvif_port
     device_uuid: str = ""
 
@@ -60,8 +61,8 @@ class AppConfig:
         Required:
           NVR_HOST
           NVR_PASSWORD
-          CHANNELS  - comma-separated, each entry is channel:ip or channel:ip:name
-                      e.g. "1:192.168.2.121:Front Door,2:192.168.2.122:Backyard"
+          CHANNELS  - comma-separated, each entry is channel|ip|name|mac
+                      e.g. "1|192.168.2.121|Front Door|02:42:c0:a8:02:79"
 
         Optional:
           NVR_PORT       (default 80)
@@ -82,11 +83,12 @@ class AppConfig:
             entry = entry.strip()
             if not entry:
                 continue
-            parts = entry.split(":", 2)
+            parts = entry.split("|")
             ch_num = int(parts[0])
             ip = parts[1]
             name = parts[2] if len(parts) > 2 else ""
-            channels.append(ChannelConfig(channel=ch_num, ip=ip, name=name))
+            mac = parts[3] if len(parts) > 3 else ""
+            channels.append(ChannelConfig(channel=ch_num, ip=ip, name=name, mac=mac))
 
         return cls(
             nvr=nvr,

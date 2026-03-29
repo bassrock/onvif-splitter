@@ -1,19 +1,35 @@
 #!/bin/bash
 set -e
 
-# Add secondary IP addresses for virtual cameras.
-# The primary IP is assigned by Docker's macvlan network.
-# Format: SECONDARY_IPS="192.168.2.122/24,192.168.2.123/24,..."
+# Create macvlan subinterfaces for each camera channel.
+# Each gets its own MAC and IP so it appears as a separate device on the network.
+#
+# CHANNELS env format: channel|ip|name|mac,...
+# The first channel uses the container's primary interface (eth0).
+# Remaining channels get macvlan subinterfaces.
 
-if [ -n "$SECONDARY_IPS" ]; then
-    echo "Adding secondary IPs..."
-    IFS=',' read -ra IPS <<< "$SECONDARY_IPS"
-    for ip in "${IPS[@]}"; do
-        ip=$(echo "$ip" | xargs)  # trim whitespace
-        echo "  Adding $ip to eth0"
-        ip addr add "$ip" dev eth0 2>/dev/null || echo "  Warning: $ip may already be assigned"
+if [ -n "$CHANNELS" ]; then
+    FIRST=true
+    IFS=',' read -ra ENTRIES <<< "$CHANNELS"
+    for entry in "${ENTRIES[@]}"; do
+        entry=$(echo "$entry" | xargs)  # trim whitespace
+        [ -z "$entry" ] && continue
+
+        IFS='|' read -r CH IP NAME MAC <<< "$entry"
+
+        if [ "$FIRST" = true ]; then
+            echo "Primary interface: $IP (channel $CH)"
+            FIRST=false
+            continue
+        fi
+
+        IFACE="cam${CH}"
+        echo "Creating macvlan $IFACE: IP=$IP MAC=${MAC:-auto}"
+        ip link add "$IFACE" link eth0 type macvlan mode bridge
+        [ -n "$MAC" ] && ip link set "$IFACE" address "$MAC"
+        ip addr add "${IP}/24" dev "$IFACE"
+        ip link set "$IFACE" up
     done
-    # Give the kernel a moment to register the addresses
     sleep 1
 fi
 
