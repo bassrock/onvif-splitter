@@ -1,19 +1,20 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
-# Add secondary IP addresses for virtual cameras
+# Add secondary IP addresses for virtual cameras.
 # The primary IP is assigned by Docker's macvlan network.
-# Additional IPs (from SECONDARY_IPS env var) are added here.
-# Format: SECONDARY_IPS="192.168.2.162/24,192.168.2.163/24,..."
+# Format: SECONDARY_IPS="192.168.2.122/24,192.168.2.123/24,..."
 
 if [ -n "$SECONDARY_IPS" ]; then
     echo "Adding secondary IPs..."
-    IFS=','
-    for ip in $SECONDARY_IPS; do
+    IFS=',' read -ra IPS <<< "$SECONDARY_IPS"
+    for ip in "${IPS[@]}"; do
+        ip=$(echo "$ip" | xargs)  # trim whitespace
         echo "  Adding $ip to eth0"
-        ip addr add "$ip" dev eth0 || true
+        ip addr add "$ip" dev eth0 2>/dev/null || echo "  Warning: $ip may already be assigned"
     done
-    unset IFS
+    # Give the kernel a moment to register the addresses
+    sleep 1
 fi
 
 echo "Starting ONVIF Splitter..."
