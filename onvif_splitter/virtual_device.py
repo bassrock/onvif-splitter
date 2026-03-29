@@ -9,11 +9,14 @@ from aiohttp import web
 from .config import ChannelConfig, NvrConfig
 from .server.soap_handler import SoapHandler
 from .events.pullpoint import PullPointManager
+from .rtsp_proxy import start_rtsp_proxy
 
 if TYPE_CHECKING:
     from .discovery.ws_discovery import WsDiscovery
 
 log = logging.getLogger(__name__)
+
+RTSP_PROXY_PORT = 554
 
 
 class VirtualDevice:
@@ -30,6 +33,7 @@ class VirtualDevice:
         self.soap_handler = SoapHandler(self)
         self._runner: web.AppRunner | None = None
         self._discovery: WsDiscovery | None = None
+        self._rtsp_server: asyncio.Server | None = None
 
     @property
     def ip(self) -> str:
@@ -55,9 +59,9 @@ class VirtualDevice:
         return f"http://{self.ip}:{self.onvif_port}{path}"
 
     def rtsp_url(self, subtype: int = 0) -> str:
+        # Point to this virtual device's own RTSP proxy
         return (
-            f"rtsp://{self.nvr.username}:{self.nvr.password}@"
-            f"{self.nvr.host}:{self.nvr.rtsp_port}"
+            f"rtsp://{self.ip}:{RTSP_PROXY_PORT}"
             f"/cam/realmonitor?channel={self.channel_num}&amp;subtype={subtype}"
             f"&amp;unicast=true&amp;proto=Onvif"
         )
@@ -84,6 +88,14 @@ class VirtualDevice:
             self.onvif_port,
         )
 
+        # Start RTSP TCP proxy
+        self._rtsp_server = await start_rtsp_proxy(
+            self.ip,
+            RTSP_PROXY_PORT,
+            self.nvr.host,
+            self.nvr.rtsp_port,
+        )
+
     async def start_discovery(self):
         from .discovery.ws_discovery import WsDiscovery
 
@@ -93,6 +105,9 @@ class VirtualDevice:
     async def stop(self):
         if self._discovery:
             await self._discovery.stop()
+        if self._rtsp_server:
+            self._rtsp_server.close()
+            await self._rtsp_server.wait_closed()
         self.pullpoint_manager.shutdown()
         if self._runner:
             await self._runner.cleanup()
