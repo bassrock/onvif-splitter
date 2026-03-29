@@ -106,6 +106,7 @@ func (d *VirtualDevice) Stop() {
 func (d *VirtualDevice) PushEvent(eventXML string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	pushed := 0
 	for id, sub := range d.subscriptions {
 		if time.Since(sub.Created) > sub.TTL+30*time.Second {
 			delete(d.subscriptions, id)
@@ -113,8 +114,12 @@ func (d *VirtualDevice) PushEvent(eventXML string) {
 		}
 		select {
 		case sub.Events <- eventXML:
+			pushed++
 		default: // drop if full
 		}
+	}
+	if pushed > 0 {
+		log.Printf("Pushed event to %d subscription(s) on %s", pushed, d.Name())
 	}
 }
 
@@ -137,13 +142,7 @@ func (d *VirtualDevice) handleSOAP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check auth
-	if !soap.ValidateAuthFlexible(body, d.Config.NVR.Username, d.Config.NVR.Password) {
-		soap.WriteFault(w, "sender", "NotAuthorized", "Authentication failed", 401)
-		return
-	}
-
-	// Check for subscription endpoint
+	// Subscription endpoints — the subscription ID itself is the auth token
 	path := r.URL.Path
 	if strings.HasPrefix(path, "/onvif/subscription/") {
 		subID := strings.TrimPrefix(path, "/onvif/subscription/")
@@ -157,6 +156,12 @@ func (d *VirtualDevice) handleSOAP(w http.ResponseWriter, r *http.Request) {
 		default:
 			soap.WriteFault(w, "sender", "ActionNotSupported", "Unknown action", 400)
 		}
+		return
+	}
+
+	// Check auth for all other actions
+	if !soap.ValidateAuthFlexible(body, d.Config.NVR.Username, d.Config.NVR.Password) {
+		soap.WriteFault(w, "sender", "NotAuthorized", "Authentication failed", 401)
 		return
 	}
 
