@@ -1,0 +1,34 @@
+nvr:
+  host: 192.168.1.238
+  port: 80
+  rtsp_port: 554
+  username: admin
+  password: changeme
+
+onvif_port: 8080
+
+channels:
+  - channel: 1
+    ip: 192.168.1.121
+    name: "Camera 1"
+    mac: "00:1F:54:A1:B2:01"
+  - channel: 2
+    ip: 192.168.1.122
+    name: "Camera 2"
+    mac: "00:1F:54:A1:B2:02"
+  - channel: 4
+    ip: 192.168.1.124
+    name: "Camera 4"
+    mac: "00:1F:54:A1:B2:04"
+  - channel: 7
+    ip: 192.168.1.127
+    name: "Camera 7"
+    mac: "00:1F:54:A1:B2:07"
+  - channel: 8
+    ip: 192.168.1.128
+    name: "Camera 8"
+    mac: "00:1F:54:A1:B2:08"
+  - channel: 11
+    ip: 192.168.1.131
+    name: "Camera 11"
+    mac: "00:1F:54:A1:B2:0B"
