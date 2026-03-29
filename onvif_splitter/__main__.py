@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -18,15 +19,17 @@ log = logging.getLogger("onvif_splitter")
 
 
 async def main():
-    config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("config.yaml")
-    if not config_path.exists():
-        log.error("Config file not found: %s", config_path)
-        sys.exit(1)
-
-    cfg = AppConfig.from_yaml(config_path)
-    log.info(
-        "Loaded config: NVR %s, %d channels", cfg.nvr.host, len(cfg.channels)
-    )
+    # Try env vars first (for docker-compose inline config), fall back to YAML file
+    if os.environ.get("NVR_HOST"):
+        cfg = AppConfig.from_env()
+        log.info("Loaded config from environment variables: NVR %s, %d channels", cfg.nvr.host, len(cfg.channels))
+    else:
+        config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("config.yaml")
+        if not config_path.exists():
+            log.error("Config file not found: %s", config_path)
+            sys.exit(1)
+        cfg = AppConfig.from_yaml(config_path)
+        log.info("Loaded config from %s: NVR %s, %d channels", config_path, cfg.nvr.host, len(cfg.channels))
 
     devices: list[VirtualDevice] = []
     for ch in cfg.channels:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib
+import os
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,4 +51,45 @@ class AppConfig:
             nvr=nvr,
             channels=channels,
             onvif_port=raw.get("onvif_port", 8080),
+        )
+
+    @classmethod
+    def from_env(cls) -> AppConfig:
+        """Load config entirely from environment variables.
+
+        Required:
+          NVR_HOST
+          NVR_PASSWORD
+          CHANNELS  - comma-separated, each entry is channel:ip or channel:ip:name
+                      e.g. "1:192.168.2.121:Front Door,2:192.168.2.122:Backyard"
+
+        Optional:
+          NVR_PORT       (default 80)
+          NVR_RTSP_PORT  (default 554)
+          NVR_USERNAME   (default admin)
+          ONVIF_PORT     (default 8080)
+        """
+        nvr = NvrConfig(
+            host=os.environ["NVR_HOST"],
+            port=int(os.environ.get("NVR_PORT", "80")),
+            rtsp_port=int(os.environ.get("NVR_RTSP_PORT", "554")),
+            username=os.environ.get("NVR_USERNAME", "admin"),
+            password=os.environ["NVR_PASSWORD"],
+        )
+
+        channels = []
+        for entry in os.environ.get("CHANNELS", "").split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.split(":", 2)
+            ch_num = int(parts[0])
+            ip = parts[1]
+            name = parts[2] if len(parts) > 2 else ""
+            channels.append(ChannelConfig(channel=ch_num, ip=ip, name=name))
+
+        return cls(
+            nvr=nvr,
+            channels=channels,
+            onvif_port=int(os.environ.get("ONVIF_PORT", "8080")),
         )
