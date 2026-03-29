@@ -2,10 +2,12 @@ package device
 
 import (
 	"context"
+	"crypto/md5"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -195,28 +197,82 @@ func (d *VirtualDevice) handleSOAP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *VirtualDevice) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	url := fmt.Sprintf("http://%s:%d/cgi-bin/snapshot.cgi?channel=%d",
-		d.Config.NVR.Host, d.Config.NVR.Port, d.Channel.Channel)
+	uri := fmt.Sprintf("/cgi-bin/snapshot.cgi?channel=%d", d.Channel.Channel)
+	url := fmt.Sprintf("http://%s:%d%s", d.Config.NVR.Host, d.Config.NVR.Port, uri)
 
-	// Try basic auth first, fall back to digest
-	client := &http.Client{Timeout: 10 * time.Second}
+	// Use a transport that doesn't reuse connections (avoids auth state issues)
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+
+	// First request without auth to get digest challenge
 	req, _ := http.NewRequest("GET", url, nil)
-	req.SetBasicAuth(d.Config.NVR.Username, d.Config.NVR.Password)
 	resp, err := client.Do(req)
 	if err != nil {
 		http.Error(w, "Snapshot failed", 502)
 		return
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode == 200 {
 		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 		io.Copy(w, resp.Body)
+		resp.Body.Close()
 		return
 	}
 
-	// TODO: digest auth fallback
+	wwwAuth := resp.Header.Get("WWW-Authenticate")
+	resp.Body.Close()
+
+	if resp.StatusCode == 401 && strings.Contains(wwwAuth, "Digest") {
+		authHeader := computeDigestAuth(wwwAuth, "GET", uri,
+			d.Config.NVR.Username, d.Config.NVR.Password)
+		req2, _ := http.NewRequest("GET", url, nil)
+		req2.Header.Set("Authorization", authHeader)
+		resp2, err := client.Do(req2)
+		if err != nil {
+			http.Error(w, "Snapshot failed", 502)
+			return
+		}
+		defer resp2.Body.Close()
+		if resp2.StatusCode == 200 {
+			w.Header().Set("Content-Type", resp2.Header.Get("Content-Type"))
+			io.Copy(w, resp2.Body)
+			return
+		}
+		log.Printf("Snapshot digest auth failed: %d", resp2.StatusCode)
+	}
+
 	http.Error(w, "Snapshot failed", 502)
+}
+
+func computeDigestAuth(wwwAuth, method, uri, username, password string) string {
+	params := map[string]string{}
+	for _, match := range regexp.MustCompile(`(\w+)="([^"]*)"`) .FindAllStringSubmatch(wwwAuth, -1) {
+		params[match[1]] = match[2]
+	}
+	realm := params["realm"]
+	nonce := params["nonce"]
+	qop := params["qop"]
+
+	ha1 := md5Hash(fmt.Sprintf("%s:%s:%s", username, realm, password))
+	ha2 := md5Hash(fmt.Sprintf("%s:%s", method, uri))
+
+	if strings.Contains(qop, "auth") {
+		nc := "00000001"
+		cnonce := fmt.Sprintf("%08x", time.Now().UnixNano())
+		response := md5Hash(fmt.Sprintf("%s:%s:%s:%s:auth:%s", ha1, nonce, nc, cnonce, ha2))
+		return fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=auth, nc=%s, cnonce="%s", response="%s"`,
+			username, realm, nonce, uri, nc, cnonce, response)
+	}
+	response := md5Hash(fmt.Sprintf("%s:%s:%s", ha1, nonce, ha2))
+	return fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", response="%s"`,
+		username, realm, nonce, uri, response)
+}
+
+func md5Hash(s string) string {
+	h := md5.Sum([]byte(s))
+	return fmt.Sprintf("%x", h)
 }
 
 func (d *VirtualDevice) handleEventPush(w http.ResponseWriter, r *http.Request) {
