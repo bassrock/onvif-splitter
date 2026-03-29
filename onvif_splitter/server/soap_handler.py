@@ -215,20 +215,69 @@ class SoapHandler:
             f"http://{self.device.nvr.host}:{self.device.nvr.port}"
             f"/cgi-bin/snapshot.cgi?channel={self.device.channel_num}"
         )
-        auth = aiohttp.BasicAuth(self.device.nvr.username, self.device.nvr.password)
+        timeout = aiohttp.ClientTimeout(total=10)
         try:
-            async with aiohttp.ClientSession(auth=auth) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # First try basic auth
+                auth = aiohttp.BasicAuth(self.device.nvr.username, self.device.nvr.password)
+                async with session.get(url, auth=auth) as resp:
                     if resp.status == 200:
                         data = await resp.read()
                         return web.Response(
                             body=data,
                             content_type=resp.content_type or "image/jpeg",
                         )
+
+                    if resp.status == 401:
+                        # Fall back to digest auth
+                        www_auth = resp.headers.get("WWW-Authenticate", "")
+                        if "Digest" in www_auth:
+                            digest_header = self._compute_digest_auth(
+                                www_auth, "GET", f"/cgi-bin/snapshot.cgi?channel={self.device.channel_num}"
+                            )
+                            async with session.get(url, headers={"Authorization": digest_header}) as resp2:
+                                if resp2.status == 200:
+                                    data = await resp2.read()
+                                    return web.Response(
+                                        body=data,
+                                        content_type=resp2.content_type or "image/jpeg",
+                                    )
+
+                    log.warning("Snapshot returned %d from NVR", resp.status)
                     return web.Response(status=502, text="Snapshot failed")
         except Exception:
             log.exception("Snapshot proxy failed for ch%d", self.device.channel_num)
             return web.Response(status=502, text="Snapshot proxy error")
+
+    def _compute_digest_auth(self, www_auth: str, method: str, uri: str) -> str:
+        import re, hashlib, os
+        params = dict(re.findall(r'(\w+)="([^"]*)"', www_auth))
+        realm = params.get("realm", "")
+        nonce = params.get("nonce", "")
+        qop = params.get("qop", "")
+
+        username = self.device.nvr.username
+        password = self.device.nvr.password
+
+        ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode()).hexdigest()
+        ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
+
+        if "auth" in qop:
+            nc = "00000001"
+            cnonce = os.urandom(8).hex()
+            response = hashlib.md5(
+                f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}".encode()
+            ).hexdigest()
+            return (
+                f'Digest username="{username}", realm="{realm}", nonce="{nonce}", '
+                f'uri="{uri}", qop=auth, nc={nc}, cnonce="{cnonce}", response="{response}"'
+            )
+        else:
+            response = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+            return (
+                f'Digest username="{username}", realm="{realm}", '
+                f'nonce="{nonce}", uri="{uri}", response="{response}"'
+            )
 
     def _fault_response(
         self, code: str, subcode: str, reason: str, status: int = 500
