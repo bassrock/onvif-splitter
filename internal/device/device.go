@@ -201,14 +201,79 @@ func (d *VirtualDevice) handleSOAP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// The Dahua NVR serves exactly one snapshot at a time — any concurrent
+// requests get an immediate 502 from its internal digest-auth stage. Two
+// mechanisms protect it:
+//
+//  1. nvrSnapshotMu serializes upstream fetches across all channels.
+//  2. nvrSnapshotCache caches the last JPEG per channel so rapid-fire
+//     detection-thumbnail requests (coalesced motion bursts on a single
+//     camera fire tens of fetches/sec) don't pound the NVR.
+var (
+	nvrSnapshotMu    sync.Mutex
+	nvrSnapshotCache sync.Map // key: int channel, value: nvrCachedSnap
+)
+
+type nvrCachedSnap struct {
+	data        []byte
+	contentType string
+	at          time.Time
+}
+
+const nvrSnapshotCacheTTL = 2 * time.Second
+
 func (d *VirtualDevice) handleSnapshot(w http.ResponseWriter, r *http.Request) {
-	uri := fmt.Sprintf("/cgi-bin/snapshot.cgi?channel=%d", d.Channel.Channel)
+	ch := d.Channel.Channel
+
+	// 1. Fast path: serve from cache without touching the NVR or the mutex.
+	if cached, ok := nvrSnapshotCache.Load(ch); ok {
+		s := cached.(nvrCachedSnap)
+		if time.Since(s.at) < nvrSnapshotCacheTTL {
+			w.Header().Set("Content-Type", s.contentType)
+			w.Write(s.data)
+			return
+		}
+	}
+
+	// 2. Serialize upstream fetches — the NVR only handles one at a time.
+	nvrSnapshotMu.Lock()
+	defer nvrSnapshotMu.Unlock()
+
+	// 3. Double-checked cache read: another goroutine may have just refreshed
+	// while we were waiting for the mutex.
+	if cached, ok := nvrSnapshotCache.Load(ch); ok {
+		s := cached.(nvrCachedSnap)
+		if time.Since(s.at) < nvrSnapshotCacheTTL {
+			w.Header().Set("Content-Type", s.contentType)
+			w.Write(s.data)
+			return
+		}
+	}
+
+	uri := fmt.Sprintf("/cgi-bin/snapshot.cgi?channel=%d", ch)
 	url := fmt.Sprintf("http://%s:%d%s", d.Config.NVR.Host, d.Config.NVR.Port, uri)
 
 	// Use a transport that doesn't reuse connections (avoids auth state issues)
 	client := &http.Client{
 		Timeout:   10 * time.Second,
 		Transport: &http.Transport{DisableKeepAlives: true},
+	}
+
+	serve := func(resp *http.Response) {
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			http.Error(w, "Snapshot failed", 502)
+			return
+		}
+		ct := resp.Header.Get("Content-Type")
+		nvrSnapshotCache.Store(ch, nvrCachedSnap{
+			data:        body,
+			contentType: ct,
+			at:          time.Now(),
+		})
+		w.Header().Set("Content-Type", ct)
+		w.Write(body)
 	}
 
 	// First request without auth to get digest challenge
@@ -220,9 +285,7 @@ func (d *VirtualDevice) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if resp.StatusCode == 200 {
-		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-		io.Copy(w, resp.Body)
-		resp.Body.Close()
+		serve(resp)
 		return
 	}
 
@@ -239,12 +302,11 @@ func (d *VirtualDevice) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Snapshot failed", 502)
 			return
 		}
-		defer resp2.Body.Close()
 		if resp2.StatusCode == 200 {
-			w.Header().Set("Content-Type", resp2.Header.Get("Content-Type"))
-			io.Copy(w, resp2.Body)
+			serve(resp2)
 			return
 		}
+		resp2.Body.Close()
 		log.Printf("Snapshot digest auth failed: %d", resp2.StatusCode)
 	}
 
@@ -289,20 +351,32 @@ func (d *VirtualDevice) handleEventPush(w http.ResponseWriter, r *http.Request) 
 
 func extractBodyInner(xmlBytes []byte) []byte {
 	s := string(xmlBytes)
-	// Find <s:Body> or <Body> content
+	// Find <Body>, <s:Body>, <SOAP-ENV:Body>, ... — any namespace prefix length.
+	// We locate "Body>" (or "body>"), then scan backward to the preceding '<'
+	// to capture the full prefix rather than assuming exactly two characters.
 	for _, tag := range []string{"Body>", "body>"} {
-		idx := strings.Index(s, tag)
-		if idx >= 0 {
-			start := idx + len(tag)
-			endTag := "</" + s[idx-2:idx] + tag
-			end := strings.Index(s[start:], endTag)
-			if end < 0 {
-				end = strings.LastIndex(s, "</")
-			}
-			if end >= 0 {
-				return []byte(s[start : start+end])
-			}
+		openIdx := strings.Index(s, tag)
+		if openIdx < 0 {
+			continue
 		}
+		ltIdx := strings.LastIndex(s[:openIdx], "<")
+		if ltIdx < 0 {
+			continue
+		}
+		prefix := s[ltIdx+1 : openIdx]
+		// If this isn't actually the Body open tag (e.g. we landed inside
+		// attribute text), reject and move on.
+		if strings.ContainsAny(prefix, " \t\r\n<>/") {
+			continue
+		}
+		start := openIdx + len(tag)
+		endTag := "</" + prefix + tag
+		if relEnd := strings.Index(s[start:], endTag); relEnd >= 0 {
+			return []byte(s[start : start+relEnd])
+		}
+		// No matching close tag — return the remainder so ParseAction can
+		// still find the first start element inside.
+		return []byte(s[start:])
 	}
 	return xmlBytes
 }
